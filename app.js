@@ -3,17 +3,21 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 // ── 10-color palette ──
 const PALETTE = [
-  { name: '빨강', hex: 0xFF0000, rgb: [255, 0, 0] },
-  { name: '주황', hex: 0xFF8C00, rgb: [255, 140, 0] },
-  { name: '노랑', hex: 0xFFD700, rgb: [255, 215, 0] },
-  { name: '초록', hex: 0x00AA00, rgb: [0, 170, 0] },
-  { name: '파랑', hex: 0x0066FF, rgb: [0, 102, 255] },
-  { name: '남색', hex: 0x1B0066, rgb: [27, 0, 102] },
-  { name: '보라', hex: 0x8B00FF, rgb: [139, 0, 255] },
-  { name: '회색', hex: 0x808080, rgb: [128, 128, 128] },
-  { name: '흰색', hex: 0xFFFFFF, rgb: [255, 255, 255] },
-  { name: '검정', hex: 0x000000, rgb: [0, 0, 0] },
+  { name: 'Red',    hex: 0xFF0000, rgb: [255, 0, 0] },
+  { name: 'Orange', hex: 0xFF8C00, rgb: [255, 140, 0] },
+  { name: 'Yellow', hex: 0xFFD700, rgb: [255, 215, 0] },
+  { name: 'Green',  hex: 0x00AA00, rgb: [0, 170, 0] },
+  { name: 'Blue',   hex: 0x0066FF, rgb: [0, 102, 255] },
+  { name: 'Indigo', hex: 0x1B0066, rgb: [27, 0, 102] },
+  { name: 'Violet', hex: 0x8B00FF, rgb: [139, 0, 255] },
+  { name: 'Gray',   hex: 0x808080, rgb: [128, 128, 128] },
+  { name: 'White',  hex: 0xFFFFFF, rgb: [255, 255, 255] },
+  { name: 'Black',  hex: 0x000000, rgb: [0, 0, 0] },
 ];
+
+// ── Space URL (obfuscated) ──
+const _p = ['\x73\x6f\x6c\x62\x6f\x6e','1212','/','chroma-relief','-depth'];
+const SPACE_URL = _p[0] + _p[1] + _p[2] + _p[3] + _p[4];
 
 // ── DOM refs ──
 const videoEl = document.getElementById('hidden-video');
@@ -26,7 +30,6 @@ const uploadUI = document.getElementById('upload-ui');
 const controlsUI = document.getElementById('controls');
 const statusBar = document.getElementById('status-bar');
 const videoInput = document.getElementById('video-input');
-const spaceUrlInput = document.getElementById('space-url');
 const colsSlider = document.getElementById('cols-slider');
 const depthSlider = document.getElementById('depth-slider');
 const colsValue = document.getElementById('cols-value');
@@ -42,7 +45,7 @@ let depthScale = 3.0;
 let tiles = [];
 let videoReady = false;
 let needsRebuild = false;
-const tileGap = 0.08;
+const tileGap = 0.06;
 const tileSize = 1;
 const clock = new THREE.Clock();
 
@@ -56,12 +59,18 @@ let aiDepthGrid = null;
 let lastDepthTime = 0;
 const DEPTH_INTERVAL_MS = 1500;
 
+// Audio state
+let audioCtx = null;
+let analyser = null;
+let audioSource = null;
+let smoothVolume = 0;
+const AUDIO_ROW_OFFSET = 3; // 3rd row from bottom
+
 // ── Three.js setup ──
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x111111);
 
 const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 500);
-camera.position.set(0, -10, 55);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -112,27 +121,54 @@ function brightness(r, g, b) {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
+// ── Audio analysis ──
+function setupAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new AudioContext();
+    audioSource = audioCtx.createMediaElementSource(videoEl);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    audioSource.connect(analyser);
+    analyser.connect(audioCtx.destination);
+    videoEl.muted = false;
+    videoEl.volume = 1.0;
+  } catch (e) {
+    console.warn('Audio setup failed:', e);
+  }
+}
+
+function getVolume() {
+  if (!analyser) return 0;
+  const data = new Uint8Array(analyser.fftSize);
+  analyser.getByteTimeDomainData(data);
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / data.length);
+}
+
 // ── HuggingFace Space Depth API ──
 async function connectToSpace() {
   if (depthConnecting || depthReady) return;
   depthConnecting = true;
-
-  const spaceUrl = spaceUrlInput.value.trim();
-  showStatus('깊이 추정 서버 연결 중... (첫 연결 시 ~30초 소요)');
+  showStatus('Connecting to depth server... (~30s on first load)');
 
   try {
     const { Client } = await import(
       'https://cdn.jsdelivr.net/npm/@gradio/client/+esm'
     );
-    gradioClient = await Client.connect(spaceUrl);
+    gradioClient = await Client.connect(SPACE_URL);
     depthReady = true;
-    showStatus('AI 깊이 서버 연결 완료!');
+    showStatus('AI depth server connected!');
     setTimeout(hideStatus, 2000);
   } catch (err) {
     console.error('Space connection failed:', err);
-    showStatus('서버 연결 실패 - Space URL 확인 또는 잠시 후 재시도');
+    showStatus('Server connection failed — falling back to brightness');
     useAIDepth = false;
-    depthModeBtn.textContent = '깊이: 밝기';
+    depthModeBtn.textContent = 'Depth: Brightness';
     depthModeBtn.classList.remove('active');
     setTimeout(hideStatus, 4000);
   }
@@ -151,7 +187,6 @@ async function runDepthEstimation() {
   lastDepthTime = now;
 
   try {
-    // Capture current frame as JPEG blob
     const inputW = 512;
     const aspect = videoEl.videoWidth / videoEl.videoHeight;
     const inputH = Math.round(inputW / aspect);
@@ -160,14 +195,9 @@ async function runDepthEstimation() {
     depthCtx.drawImage(videoEl, 0, 0, inputW, inputH);
 
     const blob = await new Promise(r => depthCanvasEl.toBlob(r, 'image/jpeg', 0.85));
-
-    // Call Space API
     const result = await gradioClient.predict('/predict', [blob]);
-
-    // result.data[0] = { url: "...", ... } for image output
     const depthImageUrl = result.data[0].url;
 
-    // Load depth image into browser
     const img = new Image();
     img.crossOrigin = 'anonymous';
     await new Promise((resolve, reject) => {
@@ -176,7 +206,6 @@ async function runDepthEstimation() {
       img.src = depthImageUrl;
     });
 
-    // Downsample to grid resolution and extract depth values
     depthCanvasEl.width = cols;
     depthCanvasEl.height = rows;
     depthCtx.drawImage(img, 0, 0, cols, rows);
@@ -186,7 +215,7 @@ async function runDepthEstimation() {
     const newGrid = new Float32Array(rows * cols);
     let minVal = 255, maxVal = 0;
     for (let i = 0; i < rows * cols; i++) {
-      const v = pixels[i * 4]; // R channel (grayscale depth map)
+      const v = pixels[i * 4];
       if (v < minVal) minVal = v;
       if (v > maxVal) maxVal = v;
     }
@@ -201,6 +230,22 @@ async function runDepthEstimation() {
   }
 
   depthRunning = false;
+}
+
+// ── Camera: fit grid to viewport ──
+function fitCameraToGrid(totalW, totalH) {
+  const fovRad = camera.fov * Math.PI / 180;
+  const viewAspect = window.innerWidth / window.innerHeight;
+
+  // Distance to fit the grid in view
+  const dForHeight = (totalH / 2) / Math.tan(fovRad / 2);
+  const dForWidth = (totalW / 2) / (Math.tan(fovRad / 2) * viewAspect);
+  const d = Math.max(dForHeight, dForWidth) * 1.02; // 2% margin
+
+  // Slight downward angle to reveal 3D depth
+  camera.position.set(0, -d * 0.12, d);
+  orbitControls.target.set(0, 0, 0);
+  orbitControls.update();
 }
 
 // ── Build tile grid ──
@@ -241,11 +286,7 @@ function buildTiles() {
   }
 
   aiDepthGrid = null;
-
-  const maxDim = Math.max(totalW, totalH);
-  camera.position.set(0, -maxDim * 0.18, maxDim * 0.85);
-  orbitControls.target.set(0, 0, 0);
-  orbitControls.update();
+  fitCameraToGrid(totalW, totalH);
 }
 
 // ── Sample video frame ──
@@ -259,7 +300,6 @@ function sampleFrame() {
   const imageData = ctx.getImageData(0, 0, cols, rows);
   const data = imageData.data;
 
-  // Trigger async depth estimation if AI mode
   if (useAIDepth && depthReady) {
     runDepthEstimation();
   }
@@ -297,20 +337,36 @@ function animate() {
 
   sampleFrame();
 
+  // Audio volume (smoothed)
+  const rawVol = getVolume();
+  smoothVolume += (rawVol - smoothVolume) * 0.2;
+
   const elapsed = clock.getElapsedTime();
   const lerpFactor = 0.12;
+  const audioRow = rows - AUDIO_ROW_OFFSET;
 
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
-
-    t.mesh.material.color.lerp(t.targetColor, lerpFactor);
-
     const row = Math.floor(i / cols);
     const col = i % cols;
+
+    // Smooth color transition
+    t.mesh.material.color.lerp(t.targetColor, lerpFactor);
+
+    // Breathing sine wave
     const breathe = Math.sin(elapsed * 1.5 + row * 0.15 + col * 0.1) * 0.12;
 
+    // Smooth depth transition
     t.currentZ += (t.targetZ - t.currentZ) * lerpFactor;
     t.mesh.position.z = t.currentZ + breathe;
+
+    // Audio-reactive: 3rd row from bottom pulses with volume
+    if (row === audioRow && audioRow >= 0) {
+      const pulse = 1 + smoothVolume * 3.0;
+      t.mesh.scale.set(pulse, pulse, pulse);
+    } else {
+      t.mesh.scale.set(1, 1, 1);
+    }
   }
 
   orbitControls.update();
@@ -324,6 +380,7 @@ videoInput.addEventListener('change', (e) => {
 
   const url = URL.createObjectURL(file);
   videoEl.src = url;
+  videoEl.muted = true; // muted initially for autoplay
   videoEl.load();
 
   videoEl.addEventListener('loadeddata', () => {
@@ -336,6 +393,9 @@ videoInput.addEventListener('change', (e) => {
     controlsUI.classList.remove('hidden');
 
     buildTiles();
+
+    // Setup audio on user interaction, then unmute and play
+    setupAudio();
     videoEl.play();
   }, { once: true });
 });
@@ -358,25 +418,33 @@ depthSlider.addEventListener('input', () => {
 depthModeBtn.addEventListener('click', () => {
   useAIDepth = !useAIDepth;
   if (useAIDepth) {
-    depthModeBtn.textContent = '깊이: AI';
+    depthModeBtn.textContent = 'Depth: AI';
     depthModeBtn.classList.add('active');
     if (!depthReady && !depthConnecting) {
       connectToSpace();
     }
   } else {
-    depthModeBtn.textContent = '깊이: 밝기';
+    depthModeBtn.textContent = 'Depth: Brightness';
     depthModeBtn.classList.remove('active');
     aiDepthGrid = null;
   }
 });
 
-playBtn.addEventListener('click', () => videoEl.play());
+playBtn.addEventListener('click', () => {
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+  videoEl.play();
+});
 pauseBtn.addEventListener('click', () => videoEl.pause());
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (videoReady) {
+    const totalW = cols * (tileSize + tileGap) - tileGap;
+    const totalH = rows * (tileSize + tileGap) - tileGap;
+    fitCameraToGrid(totalW, totalH);
+  }
 });
 
 // ── Start ──

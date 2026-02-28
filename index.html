@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,26 +13,22 @@
 
   <div id="upload-ui">
     <h1>ChromaRelief</h1>
-    <p>영상을 업로드하면 10색 팔레트 타일 부조로 변환됩니다</p>
-    <div id="space-config">
-      <label for="space-url">HF Space URL</label>
-      <input type="text" id="space-url" value="solbon1212/chroma-relief-depth" placeholder="username/space-name">
-    </div>
-    <label id="upload-label" for="video-input">영상 선택</label>
+    <p>Upload a video to transform it into a 10-color palette tile relief</p>
+    <label id="upload-label" for="video-input">Choose Video</label>
     <input type="file" id="video-input" accept="video/*">
   </div>
 
   <div id="controls" class="hidden">
     <div class="control-group">
-      <label>타일 (가로): <span id="cols-value">60</span></label>
+      <label>Tiles (H): <span id="cols-value">60</span></label>
       <input type="range" id="cols-slider" min="10" max="120" value="60">
     </div>
     <div class="control-group">
-      <label>깊이 강도: <span id="depth-value">3.0</span></label>
+      <label>Depth: <span id="depth-value">3.0</span></label>
       <input type="range" id="depth-slider" min="0.5" max="10" value="3" step="0.1">
     </div>
     <div class="control-group">
-      <button id="depth-mode-btn" title="밝기 기반 / AI 깊이 전환">깊이: 밝기</button>
+      <button id="depth-mode-btn" title="Toggle brightness / AI depth">Depth: Brightness</button>
     </div>
     <div class="control-group">
       <button id="play-btn">&#9654;</button>
@@ -40,7 +36,7 @@
     </div>
   </div>
 
-  <video id="hidden-video" style="display:none" muted loop></video>
+  <video id="hidden-video" style="display:none" loop></video>
   <canvas id="hidden-canvas" style="display:none"></canvas>
   <canvas id="depth-canvas" style="display:none"></canvas>
 
